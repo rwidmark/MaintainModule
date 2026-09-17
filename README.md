@@ -17,6 +17,7 @@ Works on all OS versions.
 - If specified module are missing you can choose to install it
 - Ignore SkipPublisherCheck
 - Update / install Pre-release
+- Support `-Verbose` and `-WhatIf` on state-changing commands
 
 ## Dependencies
 - Module also require that you have my service module installed, [rsServiceModule](https://github.com/rwidmark/rsServiceModule)
@@ -97,3 +98,9 @@ If you want to allow pre-releases simply add ```-AllowPrerelease $true````
 
 ### SkipPublisherCheck (only exists in beta)
 If you for some reason want to skip publisher check add ```-SkipPublisherCheck $true``` this is needed for Pester and PowerCLI for an example
+
+### Preview changes with `-WhatIf`
+Use `-WhatIf` on `Update-rsModule` or `Uninstall-rsModule` to review the actions before the module changes anything.
+
+### Show more details with `-Verbose`
+Use `-Verbose` to see repository checks, install decisions, and cleanup steps while the command runs.

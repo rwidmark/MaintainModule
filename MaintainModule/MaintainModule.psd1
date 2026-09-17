@@ -39,7 +39,7 @@
     ModuleVersion     = '2.0.5'
 
     # Supported PSEditions
-    # CompatiblePSEditions = @()
+    CompatiblePSEditions = @('Desktop', 'Core')
 
     # ID used to uniquely identify this module
     GUID              = '4fec1769-909e-44cf-b715-bbc6b10564b3'
@@ -99,7 +99,7 @@
     CmdletsToExport   = @()
 
     # Variables to export from this module
-    VariablesToExport = '*'
+    VariablesToExport = @()
 
     # Aliases to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no aliases to export.
     AliasesToExport   = @()
