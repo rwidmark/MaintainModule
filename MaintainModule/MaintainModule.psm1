@@ -22,6 +22,20 @@
     SOFTWARE.
 #>
 function Get-rsModuleDetail {
+    <#
+        .SYNOPSIS
+        Returns the newest installed version and older versions for one module.
+
+        .DESCRIPTION
+        Processes the installed versions for a single module name and returns
+        the newest version together with any older installed versions.
+
+        .PARAMETER InstalledModule
+        One or more installed module objects for the same module name.
+
+        .OUTPUTS
+        PSCustomObject
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true, HelpMessage = 'Enter installed module objects for a single module name.')]
@@ -65,6 +79,17 @@ function Get-rsModuleDetail {
 }
 
 function Get-rsCallerPreferenceMap {
+    <#
+        .SYNOPSIS
+        Captures common caller preferences for nested commands.
+
+        .DESCRIPTION
+        Builds a hashtable of supported caller preferences so nested commands
+        honor flags such as -Verbose and -WhatIf consistently.
+
+        .OUTPUTS
+        Hashtable
+    #>
     [CmdletBinding()]
     param()
 
@@ -83,6 +108,20 @@ function Get-rsCallerPreferenceMap {
 }
 
 function Get-rsRequestedModuleList {
+    <#
+        .SYNOPSIS
+        Normalizes requested module names.
+
+        .DESCRIPTION
+        Trims input values, removes empty entries, and de-duplicates module
+        names by using a case-insensitive comparison.
+
+        .PARAMETER Module
+        Module names to normalize.
+
+        .OUTPUTS
+        String[]
+    #>
     [CmdletBinding()]
     param(
         [Parameter(HelpMessage = 'Enter module names to normalize and de-duplicate.')]
@@ -104,6 +143,26 @@ function Get-rsRequestedModuleList {
 }
 
 function Get-rsLatestRepositoryModule {
+    <#
+        .SYNOPSIS
+        Gets the newest available module version from a repository.
+
+        .DESCRIPTION
+        Queries PowerShellGet for a module and normalizes the result to a
+        single newest repository version.
+
+        .PARAMETER ModuleName
+        The name of the module to find.
+
+        .PARAMETER Repository
+        The repository to query when one is known.
+
+        .PARAMETER AllowPrerelease
+        Includes prerelease versions in the repository lookup.
+
+        .OUTPUTS
+        PSObject
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true, HelpMessage = 'Enter the name of the module to look up in the repository.')]
@@ -139,25 +198,38 @@ function Get-rsLatestRepositoryModule {
 function Uninstall-rsModule {
     <#
         .SYNOPSIS
-        Uninstall older versions of your modules in a easy way.
+        Removes older installed versions of PowerShell modules.
 
         .DESCRIPTION
-        This script let users uninstall older versions of the modules that are installed on the system.
+        Removes older installed versions for the requested modules. When no
+        module names are provided, the command inspects all installed modules
+        and removes every discovered older version.
 
         .PARAMETER Module
-        Specify modules that you want to uninstall older versions from, if this is left empty all of the older versions of the systems modules will be uninstalled
+        One or more module names to clean up. If omitted, all installed modules
+        are inspected.
+
+        .PARAMETER OldVersion
+        Specific versions to remove. If omitted, older installed versions are
+        discovered automatically.
+
+        .PARAMETER AllowPrerelease
+        Allows prerelease versions when uninstalling a specific version.
 
         .EXAMPLE
-        Uninstall-rsModule -Module "VMWare.PowerCLI"
-        # This will uninstall all older versions of the module VMWare.PowerCLI system.
+        Uninstall-rsModule -Module 'VMware.PowerCLI'
+
+        Removes older installed versions of VMware.PowerCLI.
 
         .EXAMPLE
-        Uninstall-rsModule -Module "VMWare.PowerCLI", "ImportExcel"
-        # This will uninstall all older versions of VMWare.PowerCLI and ImportExcel from the system.
+        Uninstall-rsModule -Module 'VMware.PowerCLI', 'ImportExcel'
+
+        Removes older installed versions of VMware.PowerCLI and ImportExcel.
 
         .EXAMPLE
         Uninstall-rsModule
-        # This will uninstall all older versions of all modules in the system
+
+        Removes older installed versions for every installed module.
 
         .LINK
         https://github.com/rwidmark/MaintainModule/blob/main/README.md
@@ -187,28 +259,48 @@ function Uninstall-rsModule {
     )
 
     begin {
-        $versionsToRemove = @($OldVersion | Where-Object { $null -ne $_ })
-        $moduleNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $requestedModules = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $specifiedVersions = @($OldVersion | Where-Object { $null -ne $_ } | Select-Object -Unique)
     }
 
     process {
         foreach ($currentModule in (Get-rsRequestedModuleList -Module $Module)) {
-            [void]$moduleNames.Add($currentModule)
+            [void]$requestedModules.Add($currentModule)
         }
     }
 
     end {
-        foreach ($currentModule in $moduleNames) {
-            Write-Output "START - Uninstall older versions of $currentModule"
-            Write-Output "Please wait, this can take some time..."
+        $moduleQuery = if ($requestedModules.Count -gt 0) {
+            Get-rsInstalledModule -Module @($requestedModules)
+        }
+        else {
+            Get-rsInstalledModule
+        }
 
-            foreach ($_version in $versionsToRemove) {
-                if ($PSCmdlet.ShouldProcess("$currentModule $($_version)", 'Uninstall module version')) {
-                    Write-Verbose "Uninstalling version $($_version) of $($currentModule)..."
+        foreach ($moduleInfo in @($moduleQuery.Module)) {
+            $versionsToRemove = if ($specifiedVersions.Count -gt 0) {
+                @($specifiedVersions)
+            }
+            else {
+                @($moduleInfo.OldVersion)
+            }
+
+            if ($versionsToRemove.Count -eq 0) {
+                Write-Verbose "$($moduleInfo.Name) does not have any older versions to uninstall."
+                continue
+            }
+
+            Write-Output "START - Uninstall older versions of $($moduleInfo.Name)"
+            Write-Output 'Please wait, this can take some time...'
+
+            foreach ($currentVersion in $versionsToRemove) {
+                if ($PSCmdlet.ShouldProcess("$($moduleInfo.Name) $currentVersion", 'Uninstall module version')) {
+                    Write-Verbose "Uninstalling version $currentVersion of $($moduleInfo.Name)..."
+
                     try {
                         $uninstallModuleParameters = @{
-                            Name            = $currentModule
-                            RequiredVersion = $_version
+                            Name            = $moduleInfo.Name
+                            RequiredVersion = $currentVersion
                             Force           = $true
                             ErrorAction     = 'Stop'
                         }
@@ -220,24 +312,38 @@ function Uninstall-rsModule {
                         Uninstall-Module @uninstallModuleParameters
                     }
                     catch {
-                        Write-Error "Failed to uninstall version $($_version) of $($currentModule). $($PSItem.Exception.Message)"
+                        Write-Error "Failed to uninstall version $currentVersion of $($moduleInfo.Name). $($PSItem.Exception.Message)"
                         continue
                     }
                 }
             }
 
-            Write-Output "FINISHED - All older versions of $currentModule are now uninstalled!"
+            Write-Output "FINISHED - All older versions of $($moduleInfo.Name) are now uninstalled!"
         }
-    }
 
-    end {
-        if ($versionsToRemove.Count -eq 0) {
-            Write-Verbose 'No module versions were supplied for uninstall.'
+        if (@($moduleQuery.Module).Count -eq 0 -and $specifiedVersions.Count -eq 0) {
+            Write-Verbose 'No installed module versions were found for uninstall.'
         }
     }
 }
 
 function Get-rsInstalledModule {
+    <#
+        .SYNOPSIS
+        Gets installed module details for one or more module names.
+
+        .DESCRIPTION
+        Collects installed module versions, identifies the newest installed
+        version for each module, and returns any modules that were requested but
+        not found.
+
+        .PARAMETER Module
+        One or more module names to inspect. If omitted, all installed modules
+        are returned.
+
+        .OUTPUTS
+        OrderedDictionary
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, HelpMessage = "Enter module or modules that you want to update, if you don't enter any, all of the modules will be updated")]
@@ -255,12 +361,8 @@ function Get-rsInstalledModule {
     }
 
     process {
-        foreach ($moduleName in $Module) {
-            if ([string]::IsNullOrWhiteSpace($moduleName)) {
-                continue
-            }
-
-            [void]$requestedModules.Add($moduleName.Trim())
+        foreach ($moduleName in (Get-rsRequestedModuleList -Module $Module)) {
+            [void]$requestedModules.Add($moduleName)
         }
     }
 
@@ -292,9 +394,9 @@ function Get-rsInstalledModule {
         }
         else {
             Write-Verbose 'Looking if the modules exist in the system...'
-        foreach ($moduleName in $requestedModules) {
-            try {
-                $installedModuleVersions = @(Get-InstalledModule -Name $moduleName -AllVersions -ErrorAction Stop)
+            foreach ($moduleName in $requestedModules) {
+                try {
+                    $installedModuleVersions = @(Get-InstalledModule -Name $moduleName -AllVersions -ErrorAction Stop)
                 }
                 catch {
                     Write-Warning "$($moduleName) is not installed, skipping this module..."
@@ -336,6 +438,17 @@ function Get-rsInstalledModule {
 }
 
 function Test-rsComponent {
+    <#
+        .SYNOPSIS
+        Verifies required PowerShellGet prerequisites.
+
+        .DESCRIPTION
+        Ensures TLS 1.2 is enabled and makes sure the PowerShell Gallery is set
+        to Trusted before module operations run.
+
+        .OUTPUTS
+        String
+    #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
 
@@ -379,48 +492,56 @@ function Test-rsComponent {
 function Update-rsModule {
     <#
         .SYNOPSIS
-        This module let you maintain your installed modules in a easy way.
+        Updates installed PowerShell modules and optionally removes old versions.
 
         .DESCRIPTION
-        This function let you update all of your installed modules and also uninstall the old versions to keep things clean.
-        You can also specify module or modules that you want to update. It's also possible to install the module if it's missing and import the modules in the end of the script.
+        Updates all installed modules or only the requested modules. The command
+        can also install missing modules and remove older installed versions
+        after a successful update.
 
         .PARAMETER Module
-        Specify the module or modules that you want to update, if you don't specify any module all installed modules are updated
+        One or more module names to update. If omitted, all installed modules
+        are updated.
 
         .PARAMETER Scope
-        Need to specify scope of the installation/update for the module, either AllUsers or CurrentUser. Default is CurrentUser.
-        If this parameter is empty it will use CurrentUser
-        The parameter -Scope don't effect the uninstall-module function this is because of limitation from Microsoft.
-        - Scope effect Install/update module function.
+        Specifies the install scope for update and install operations. Valid
+        values are CurrentUser and AllUsers. The default value is CurrentUser.
 
         .PARAMETER UninstallOldVersion
-        If this switch are used all of the old versions of your modules will get uninstalled and only the current version will be installed
+        Removes older installed versions after the update completes.
 
         .PARAMETER InstallMissing
-        If you use this switch and the modules that are specified in the Module parameter are not installed on the system they will be installed.
+        Installs requested modules that are not already installed.
 
         .PARAMETER AllowPrerelease
-        If you set this to $true Pre-Releases are going to be installed / updated
+        Includes prerelease versions when searching, installing, and updating
+        modules.
 
         .PARAMETER SkipPublisherCheck
-        If you set this to $true PublisherCheck will be ignored, this is something that for example are needed for Pester and PowerCLI because there certificate are not valid for some reason.
+        Skips the publisher certificate check during install and update
+        operations.
 
         .EXAMPLE
-        Update-rsModule -Module "PowerCLI", "ImportExcel" -Scope "CurrentUser"
-        # This will update the modules PowerCLI, ImportExcel for the current user
+        Update-rsModule -Module 'PowerCLI', 'ImportExcel' -Scope 'CurrentUser'
+
+        Updates PowerCLI and ImportExcel for the current user.
 
         .EXAMPLE
-        Update-rsModule -Module "PowerCLI", "ImportExcel" -UninstallOldVersion
-        # This will update the modules PowerCLI, ImportExcel and delete all of the old versions that are installed of PowerCLI, ImportExcel.
+        Update-rsModule -Module 'PowerCLI', 'ImportExcel' -UninstallOldVersion
+
+        Updates PowerCLI and ImportExcel and removes older installed versions.
 
         .EXAMPLE
-        Update-rsModule -Module "PowerCLI", "ImportExcel" -InstallMissing
-        # This will install the modules PowerCLI and/or ImportExcel on the system if they are missing, if the modules are installed already they will only get updated.
+        Update-rsModule -Module 'PowerCLI', 'ImportExcel' -InstallMissing
+
+        Installs missing requested modules and updates ones that are already
+        installed.
 
         .EXAMPLE
-        Update-rsModule -Module "PowerCLI", "ImportExcel" -UninstallOldVersion -ImportModule
-        # This will update the modules PowerCLI and ImportExcel and delete all of the old versions that are installed of PowerCLI and ImportExcel and then import the modules.
+        Update-rsModule -Module 'PowerCLI', 'ImportExcel' -UninstallOldVersion
+
+        Updates the requested modules and removes their older installed
+        versions.
 
         .LINK
         https://github.com/rwidmark/MaintainModule/blob/main/README.md
@@ -468,12 +589,8 @@ function Update-rsModule {
     }
 
     process {
-        foreach ($moduleName in $Module) {
-            if ([string]::IsNullOrWhiteSpace($moduleName)) {
-                continue
-            }
-
-            [void]$requestedModules.Add($moduleName.Trim())
+        foreach ($moduleName in (Get-rsRequestedModuleList -Module $Module)) {
+            [void]$requestedModules.Add($moduleName)
         }
     }
 
